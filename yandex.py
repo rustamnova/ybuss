@@ -9,6 +9,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from html import escape
 from html.parser import HTMLParser
 
 HEADERS = {
@@ -228,26 +229,47 @@ class Client:
         return canonical_url(url)
 
 
-def format_stop(stop, now=None):
+def format_stop(stop, now=None, html=False):
     now = time.time() if now is None else now
     if now - stop.fetched_at > 60 or now - stop.source_time > 180 or stop.source_time - now > 60:
         raise SourceError('Данные устарели. Запроси прибытие ещё раз.')
     zone = dt.timezone(dt.timedelta(seconds=stop.tz_offset))
-    lines = [stop.name]
+    lines = ["📍 <b>" + escape(stop.name) + "</b>" if html else stop.name]
     live_count = 0
     count = 0
     for route in stop.routes:
-        lines.extend(['', '🚌 ' + route.number + (' → ' + route.destination if route.destination else '')])
+        if not html:
+            lines.extend(['', '🚌 ' + route.number + (' → ' + route.destination if route.destination else '')])
         upcoming = [event for event in route.arrivals if event.timestamp >= now - 30]
         if not upcoming:
-            lines.append('  Нет ближайших прибытий в ответе Яндекса')
+            if html:
+                lines.extend(['', '🚌 <b>' + escape(route.number) + '</b>',
+                              '<i>' + escape(route.destination) + ' · нет ближайших прибытий</i>'])
+            else:
+                lines.append('  Нет ближайших прибытий в ответе Яндекса')
         for event in upcoming:
             count += 1
             live_count += int(event.live)
             clock = dt.datetime.fromtimestamp(event.timestamp, zone).strftime('%H:%M')
             minutes = max(0, math.ceil((event.timestamp - now) / 60))
             kind = '🟢 прогноз' if event.live else '🕒 расписание'
-            lines.append(f'  {clock} · через {minutes} мин · {kind}')
+            if not html:
+                lines.append(f'  {clock} · через {minutes} мин · {kind}')
+        if html and upcoming:
+            first = upcoming[0]
+            wait = max(0, math.ceil((first.timestamp - now) / 60))
+            marker = '🟢' if first.live else '🕒'
+            clock = dt.datetime.fromtimestamp(first.timestamp, zone).strftime('%H:%M')
+            lines.extend(['', f'🚌 <b>{escape(route.number)}</b>   ·   {marker} <b>через {wait} мин</b>',
+                          '<i>' + escape(('→ ' + route.destination + ' · ') if route.destination else '') + f'в {clock}</i>'])
+            following = []
+            for event in upcoming[1:]:
+                wait = max(0, math.ceil((event.timestamp - now) / 60))
+                clock = dt.datetime.fromtimestamp(event.timestamp, zone).strftime('%H:%M')
+                marker = '🟢' if event.live else '🕒'
+                following.append(f'{marker} {wait} мин ({clock})')
+            if following:
+                lines.append('Далее: ' + ' · '.join(following))
     if not stop.routes:
         lines.append('\nВ ответе Яндекса нет маршрутов для посадки.')
     elif count and not live_count:
@@ -255,5 +277,9 @@ def format_stop(stop, now=None):
     stamp = dt.datetime.fromtimestamp(stop.fetched_at, zone).strftime('%H:%M:%S')
     offset = stop.tz_offset / 3600
     label = 'МСК' if stop.tz_offset == 10800 else f'UTC{offset:+g}'
-    lines.extend(['', f'Получено: {stamp} {label} · Яндекс Карты', stop.url])
+    if html:
+        lines.extend(['', f'<i>Получено: {stamp} {label}</i>', '<i>🟢 прогноз · 🕒 расписание</i>',
+                      '<a href="' + escape(stop.url, quote=True) + '">Открыть в Яндекс Картах</a>'])
+    else:
+        lines.extend(['', f'Получено: {stamp} {label} · Яндекс Карты', stop.url])
     return '\n'.join(lines)

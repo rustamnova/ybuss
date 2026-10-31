@@ -3,6 +3,7 @@ import logging
 import os
 import time
 import urllib.request
+from html import escape
 from pathlib import Path
 
 from yandex import Client, SourceError, format_stop
@@ -27,7 +28,7 @@ def api(method, **data):
     return result['result']
 
 
-def send(chat, text, markup=None):
+def send(chat, text, markup=None, html=False):
     # Keep complete route rows even when ten stops produce long answers.
     chunks = []
     current = ''
@@ -39,7 +40,8 @@ def send(chat, text, markup=None):
     if current:
         chunks.append(current)
     for chunk in chunks:
-        api('sendMessage', chat_id=chat, text=chunk, reply_markup=markup or KEYBOARD, disable_web_page_preview=True)
+        api('sendMessage', chat_id=chat, text=chunk, reply_markup=markup or KEYBOARD, disable_web_page_preview=True,
+            **({'parse_mode': 'HTML'} if html else {}))
 
 
 def load():
@@ -65,11 +67,11 @@ def add_stop(state, text):
     existing = next((stop for stop in state['stops']
                      if stop['url'].split('/stops/')[-1].split('/')[0] == stop_id), None)
     if existing:
-        return 'Эта остановка уже добавлена: ' + existing['name']
+        return 'Эта остановка уже добавлена: ' + escape(existing['name'])
     if len(state['stops']) >= 10:
         raise ValueError('Лимит — 10 остановок. Удали ненужную через /remove N.')
     snapshot = SOURCE.get(url)
-    preview = format_stop(snapshot)
+    preview = format_stop(snapshot, html=True)
     state['stops'].append({'url': snapshot.url, 'name': snapshot.name})
     save(state)
     return 'Остановка добавлена.\n\n' + preview
@@ -120,7 +122,7 @@ def main():
                                         snapshot = SOURCE.get(stop['url'])
                                         stop['name'] = snapshot.name
                                         save(state)
-                                        send(chat_id, format_stop(snapshot))
+                                        send(chat_id, format_stop(snapshot, html=True), html=True)
                                     except SourceError as error:
                                         send(chat_id, stop['name'] + '\n' + str(error) + '\n' + stop['url'])
                             elif text in ('📍 Остановки', '/stops'):
@@ -141,7 +143,7 @@ def main():
                                 save(state)
                                 send(chat_id, 'Остановка удалена.')
                             elif 'https://' in text:
-                                send(chat_id, add_stop(state, text))
+                                send(chat_id, add_stop(state, text), html=True)
                             else:
                                 send(chat_id, 'Пришли ссылку на остановку Яндекс Карт или нажми 🚌 Прибытие.')
                         except (ValueError, SourceError) as error:

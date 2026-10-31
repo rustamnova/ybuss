@@ -36,6 +36,18 @@ class SourceTests(unittest.TestCase):
         self.assertNotIn('≈', result)
         self.assertEqual(stop.routes[0].destination, 'Метро')
 
+    def test_telegram_html_highlights_primary_data_and_escapes_names(self):
+        from dataclasses import replace
+        stop = parse_page(page(), URL, NOW)
+        stop = replace(stop, name='Остановка <A&B>', routes=(replace(stop.routes[0], destination='<Метро>'),))
+        result = format_stop(stop, NOW, html=True)
+        self.assertIn('<b>509</b>', result)
+        self.assertIn('<b>через 7 мин</b>', result)
+        self.assertIn('Остановка &lt;A&amp;B&gt;', result)
+        self.assertIn('→ &lt;Метро&gt;', result)
+        self.assertIn('20 мин (00:18)', result)
+        self.assertNotIn('<b>00:05', result)
+
     def test_schedule_is_not_presented_as_live(self):
         html = page(events=[{'Scheduled': {'value': str(NOW + 120)}}])
         result = format_stop(parse_page(html, URL, NOW), NOW)
