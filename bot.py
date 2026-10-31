@@ -59,6 +59,22 @@ def save(state):
     temp.replace(STATE / 'state.json')
 
 
+def add_stop(state, text):
+    url = SOURCE.resolve(text)
+    stop_id = url.split('/stops/')[-1].split('/')[0]
+    existing = next((stop for stop in state['stops']
+                     if stop['url'].split('/stops/')[-1].split('/')[0] == stop_id), None)
+    if existing:
+        return 'Эта остановка уже добавлена: ' + existing['name']
+    if len(state['stops']) >= 10:
+        raise ValueError('Лимит — 10 остановок. Удали ненужную через /remove N.')
+    snapshot = SOURCE.get(url)
+    preview = format_stop(snapshot)
+    state['stops'].append({'url': snapshot.url, 'name': snapshot.name})
+    save(state)
+    return 'Остановка добавлена.\n\n' + preview
+
+
 
 def main():
     STATE.mkdir(parents=True, exist_ok=True)
@@ -109,6 +125,8 @@ def main():
                                         send(chat_id, stop['name'] + '\n' + str(error) + '\n' + stop['url'])
                             elif text in ('📍 Остановки', '/stops'):
                                 send(chat_id, '\n\n'.join(f'{i+1}. {s["name"]}\n{s["url"]}' for i, s in enumerate(state['stops'])) or 'Остановок пока нет.')
+                            elif text == '➕ Добавить остановку':
+                                send(chat_id, 'Пришли ссылку на остановку Яндекс Карт — короткую или полную. Я определю название и добавлю её в меню «Остановки».')
                             elif text == '➖ Удалить остановку':
                                 buttons = [[{'text': 'Удалить: ' + s['name'], 'callback_data': 'delete:' + s['url'].split('/stops/')[-1].split('/')[0]}] for s in state['stops']]
                                 if buttons:
@@ -123,23 +141,14 @@ def main():
                                 save(state)
                                 send(chat_id, 'Остановка удалена.')
                             elif 'https://' in text:
-                                url = SOURCE.resolve(text)
-                                if len(state['stops']) >= 10:
-                                    raise ValueError('Лимит — 10 остановок. Удали ненужную через /remove N.')
-                                if url not in [s['url'] for s in state['stops']]:
-                                    snapshot = SOURCE.get(url)
-                                    preview = format_stop(snapshot)
-                                    state['stops'].append({'url': url, 'name': snapshot.name})
-                                    save(state)
-                                    send(chat_id, 'Остановка добавлена.\n\n' + preview)
-                                else:
-                                    send(chat_id, 'Эта остановка уже добавлена.')
+                                send(chat_id, add_stop(state, text))
                             else:
                                 send(chat_id, 'Пришли ссылку на остановку Яндекс Карт или нажми 🚌 Прибытие.')
                         except (ValueError, SourceError) as error:
                             send(chat_id, str(error))
-                        except Exception:
-                            send(chat_id, 'Не удалось обработать запрос. Попробуй полную ссылку на остановку.')
+                        except Exception as error:
+                            logging.warning('Message handler failed: %s', type(error).__name__)
+                            send(chat_id, 'Не удалось обработать запрос. Попробуй позже: ошибка не обязательно связана с форматом ссылки.')
                 state['offset'] = update['update_id'] + 1
                 save(state)
         except Exception as error:

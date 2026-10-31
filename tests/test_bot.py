@@ -4,7 +4,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import bot
-from yandex import Limited
+from yandex import Client, Limited, canonical_url
+from test_yandex import NOW, URL, page
 
 
 class BotTests(unittest.TestCase):
@@ -58,6 +59,43 @@ class BotTests(unittest.TestCase):
             'id': 'callback', 'from': {'id': 42}, 'data': 'delete:stop__9675162'}}
         self.run_update(state, update)
         self.assertEqual([s['name'] for s in state['stops']], ['Другая'])
+
+    def test_add_button_requests_short_or_full_link(self):
+        send, _ = self.run_update(self.state(), self.message('➕ Добавить остановку'))
+        self.assertIn('короткую или полную', send.call_args.args[1])
+
+    def test_short_and_full_link_add_save_and_deduplicate(self):
+        full = 'https://yandex.ru/maps/213/moscow/stops/stop__9681509/?indoorLevel=1&lang=ru_RU&ll=37.662362%2C55.886998&tab=overview&z=19.52'
+        short = 'https://yandex.ru/maps/-/CXf7zG1y'
+        canonical = canonical_url(full)
+        html = page().replace('stop__9675162', 'stop__9681509')
+        for first, second in ((short, full), (full, short)):
+            with self.subTest(first=first):
+                client = Client(fetcher=lambda url: (html, canonical), clock=lambda: NOW)
+                state = self.state()
+                with patch.object(bot, 'SOURCE', client), patch('bot.format_stop', return_value='Данные остановки'):
+                    send, save = self.run_update(state, self.message(first))
+                    self.assertIn('Остановка добавлена', send.call_args.args[1])
+                    self.assertEqual(state['stops'][-1]['url'], canonical)
+                    self.assertEqual(state['stops'][-1]['name'], 'Тестовая остановка')
+                    save.assert_called()
+                    send, _ = self.run_update(state, self.message(second))
+                    self.assertIn('уже добавлена', send.call_args.args[1])
+                    self.assertEqual(len(state['stops']), 2)
+
+    def test_existing_stop_at_limit_is_reported_as_duplicate(self):
+        state = self.state()
+        state['stops'] *= 10
+        send, _ = self.run_update(state, self.message(URL))
+        self.assertIn('уже добавлена', send.call_args.args[1])
+
+    def test_source_failure_does_not_save_stop(self):
+        state = self.state()
+        other = URL.replace('9675162', '9681509')
+        with patch.object(bot.SOURCE, 'get', side_effect=Limited('Временное ограничение')):
+            send, _ = self.run_update(state, self.message(other))
+        self.assertEqual(len(state['stops']), 1)
+        self.assertIn('Временное ограничение', send.call_args.args[1])
 
 
 if __name__ == '__main__':
