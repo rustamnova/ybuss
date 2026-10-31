@@ -38,9 +38,12 @@ class BotTests(unittest.TestCase):
     def message(self, text, user=42):
         return {'update_id': 1, 'message': {'chat': {'id': user, 'type': 'private'}, 'text': text}}
 
+    def callback(self, data, user=42):
+        return {'update_id': 1, 'callback_query': {'id': 'callback', 'from': {'id': user}, 'data': data}}
+
     def test_arrival_error_is_shown_without_old_values(self):
         with patch.object(bot.SOURCE, 'get', side_effect=Limited('Временное ограничение')):
-            send, save = self.run_update(self.state(), self.message('🚌 Прибытие'))
+            send, save = self.run_update(self.state(), self.callback('arrival:stop__9675162'))
         self.assertIn('Временное ограничение', send.call_args.args[1])
         self.assertNotIn('через', send.call_args.args[1])
 
@@ -48,6 +51,50 @@ class BotTests(unittest.TestCase):
         state = self.state()
         self.run_update(state, self.message('/remove 1', user=99))
         self.assertEqual(len(state['stops']), 1)
+
+    def test_stop_menu_lists_named_buttons_without_fetching(self):
+        state = self.state()
+        state['stops'].append({'url': bot.DEFAULT.replace('9675162', '123'), 'name': 'Другая'})
+        with patch.object(bot.SOURCE, 'get') as get:
+            send, _ = self.run_update(state, self.message('📍 Остановки'))
+        get.assert_not_called()
+        buttons = send.call_args.args[2]['inline_keyboard']
+        self.assertEqual([row[0]['text'] for row in buttons], ['Тестовая', 'Другая'])
+        self.assertEqual(buttons[1][0]['callback_data'], 'arrival:stop__123')
+        self.assertNotIn('🚌 Прибытие', str(bot.KEYBOARD))
+
+    def test_selection_fetches_only_chosen_stop_and_offers_refresh(self):
+        from types import SimpleNamespace
+        state = self.state()
+        other = bot.DEFAULT.replace('9675162', '123')
+        state['stops'].append({'url': other, 'name': 'Другая'})
+        with patch.object(bot.SOURCE, 'get', return_value=SimpleNamespace(name='Другая')) as get, \
+                patch.object(bot, 'format_stop', return_value='Прогноз выбранной остановки'):
+            send, _ = self.run_update(state, self.callback('arrival:stop__123'))
+        get.assert_called_once_with(other)
+        self.assertEqual(send.call_args.args[1], 'Прогноз выбранной остановки')
+        self.assertTrue(send.call_args.kwargs['html'])
+        actions = send.call_args.args[2]['inline_keyboard']
+        self.assertEqual(actions[0][0]['callback_data'], 'arrival:stop__123')
+        self.assertEqual(actions[1][0]['callback_data'], 'stops')
+
+    def test_deleted_stop_button_does_not_fetch_or_show_another_stop(self):
+        with patch.object(bot.SOURCE, 'get') as get:
+            send, _ = self.run_update(self.state(), self.callback('arrival:stop__123'))
+        get.assert_not_called()
+        self.assertIn('уже удалена', send.call_args_list[0].args[1])
+
+    def test_other_user_cannot_request_owner_stop_by_callback(self):
+        with patch.object(bot.SOURCE, 'get') as get:
+            send, _ = self.run_update(self.state(), self.callback('arrival:stop__9675162', user=99))
+        get.assert_not_called()
+        send.assert_not_called()
+
+    def test_legacy_arrival_button_opens_picker(self):
+        with patch.object(bot.SOURCE, 'get') as get:
+            send, _ = self.run_update(self.state(), self.message('🚌 Прибытие'))
+        get.assert_not_called()
+        self.assertIn('Выбери остановку', send.call_args.args[1])
 
     def test_delete_button_contains_name_and_stable_identifier(self):
         send, _ = self.run_update(self.state(), self.message('➖ Удалить остановку'))

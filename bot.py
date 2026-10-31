@@ -15,7 +15,7 @@ STATE = Path(os.environ.get('STATE_DIRECTORY', '/var/lib/yandexbus'))
 TOKEN = None
 SOURCE = Client()
 DEFAULT = 'https://yandex.ru/maps/213807/boltino/stops/stop__9675162/?tab=overview'
-KEYBOARD = {'keyboard': [[{'text': '🚌 Прибытие'}], [{'text': '📍 Остановки'}], [{'text': '➕ Добавить остановку'}, {'text': '➖ Удалить остановку'}]], 'resize_keyboard': True}
+KEYBOARD = {'keyboard': [[{'text': '📍 Остановки'}], [{'text': '➕ Добавить остановку'}, {'text': '➖ Удалить остановку'}]], 'resize_keyboard': True}
 
 
 def api(method, **data):
@@ -80,6 +80,38 @@ def add_stop(state, text):
     return 'Остановка добавлена.\n\n' + preview
 
 
+def show_stops(state):
+    if not state['stops']:
+        send(state['owner'], 'Остановок пока нет. Нажми «➕ Добавить остановку» и пришли ссылку Яндекс Карт.')
+        return
+    buttons = [[{'text': stop['name'],
+                 'callback_data': 'arrival:' + stop['url'].split('/stops/')[-1].split('/')[0]}]
+               for stop in state['stops']]
+    send(state['owner'], '📍 Выбери остановку — покажу прибытие автобусов только по ней:',
+         {'inline_keyboard': buttons})
+
+
+def show_arrivals(state, stop_id):
+    stop = next((stop for stop in state['stops']
+                 if stop['url'].split('/stops/')[-1].split('/')[0] == stop_id), None)
+    if stop is None:
+        send(state['owner'], 'Эта остановка уже удалена. Выбери другую.')
+        show_stops(state)
+        return
+    send(state['owner'], 'Получаю прибытие: ' + stop['name'] + '…')
+    actions = {'inline_keyboard': [
+        [{'text': '🔄 Обновить', 'callback_data': 'arrival:' + stop_id}],
+        [{'text': '📍 Другие остановки', 'callback_data': 'stops'}],
+    ]}
+    try:
+        snapshot = SOURCE.get(stop['url'])
+        stop['name'] = snapshot.name
+        save(state)
+        send(state['owner'], format_stop(snapshot, html=True), actions, html=True)
+    except SourceError as error:
+        send(state['owner'], stop['name'] + '\n' + str(error), actions)
+
+
 
 def main():
     STATE.mkdir(parents=True, exist_ok=True)
@@ -97,7 +129,15 @@ def main():
                         logging.warning('Could not acknowledge callback')
                     if callback.get('from', {}).get('id') == state['owner']:
                         data = callback.get('data', '')
-                        if data.startswith('delete:'):
+                        if data == 'stops':
+                            show_stops(state)
+                        elif data.startswith('arrival:'):
+                            try:
+                                show_arrivals(state, data.split(':', 1)[1])
+                            except Exception as error:
+                                logging.warning('Arrival handler failed: %s', type(error).__name__)
+                                send(state['owner'], 'Не удалось получить прибытие. Открой «📍 Остановки» и попробуй ещё раз.')
+                        elif data.startswith('delete:'):
                             stop_id = data.split(':', 1)[1]
                             state['stops'] = [s for s in state['stops'] if s['url'].split('/stops/')[-1].split('/')[0] != stop_id]
                             save(state)
@@ -115,21 +155,11 @@ def main():
                     else:
                         try:
                             if text.startswith('/start'):
-                                send(chat_id, 'Готов! Нажми 🚌 Прибытие. В меню «Остановки» видны сохранённые названия. Добавляй остановки ссылками Яндекс Карт, удаляй кнопкой «Удалить остановку». 🟢 — прогноз, 🕒 — расписание.')
-                            elif text in ('🚌 Прибытие', '/bus'):
-                                send(chat_id, 'Получаю данные остановок…')
-                                if not state['stops']:
-                                    send(chat_id, 'Добавь остановку по ссылке Яндекс Карт.')
-                                for stop in state['stops']:
-                                    try:
-                                        snapshot = SOURCE.get(stop['url'])
-                                        stop['name'] = snapshot.name
-                                        save(state)
-                                        send(chat_id, format_stop(snapshot, html=True), html=True)
-                                    except SourceError as error:
-                                        send(chat_id, stop['name'] + '\n' + str(error) + '\n' + stop['url'])
-                            elif text in ('📍 Остановки', '/stops'):
-                                send(chat_id, '\n\n'.join(f'{i+1}. {s["name"]}\n{s["url"]}' for i, s in enumerate(state['stops'])) or 'Остановок пока нет.')
+                                send(chat_id, 'Готов! Открой «📍 Остановки» и выбери нужную кнопкой. Добавляй остановки ссылками Яндекс Карт, удаляй кнопкой «Удалить остановку». 🟢 — прогноз, 🕒 — расписание.')
+                                show_stops(state)
+                            elif text in ('📍 Остановки', '/stops', '🚌 Прибытие', '/bus'):
+                                # Old keyboards and commands now open the stop picker too.
+                                show_stops(state)
                             elif text == '➕ Добавить остановку':
                                 send(chat_id, 'Пришли ссылку на остановку Яндекс Карт — короткую или полную. Я определю название и добавлю её в меню «Остановки».')
                             elif text == '➖ Удалить остановку':
@@ -148,7 +178,7 @@ def main():
                             elif 'https://' in text:
                                 send(chat_id, add_stop(state, text), html=True)
                             else:
-                                send(chat_id, 'Пришли ссылку на остановку Яндекс Карт или нажми 🚌 Прибытие.')
+                                send(chat_id, 'Открой «📍 Остановки» и выбери нужную кнопкой или пришли ссылку для добавления.')
                         except (ValueError, SourceError) as error:
                             send(chat_id, str(error))
                         except Exception as error:
