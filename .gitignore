@@ -7,6 +7,7 @@ token
 *.token
 state.json
 state.tmp
+allowed_users.json
 *.log
 .secrets/
 backups/

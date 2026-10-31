@@ -1,6 +1,7 @@
 # Copyright 2026 rustamnova
 # SPDX-License-Identifier: Apache-2.0
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -24,7 +25,8 @@ class BotTests(unittest.TestCase):
         telegram.done = False
         with tempfile.TemporaryDirectory() as temp, \
                 patch.object(bot, 'STATE', Path(temp)), \
-                patch.object(bot, 'load', return_value=state), \
+                patch.object(bot, 'allowed_users', return_value=frozenset({42, 43, 44})), \
+                patch.object(bot, 'load', return_value=state if 'users' in state else {'version': 2, 'offset': 0, 'users': {str(state['owner']): state}}), \
                 patch.object(bot, 'save') as save, \
                 patch.object(bot, 'send') as send, \
                 patch.object(bot, 'api', side_effect=telegram):
@@ -36,10 +38,10 @@ class BotTests(unittest.TestCase):
         return {'owner': 42, 'offset': 0, 'stops': [{'url': bot.DEFAULT, 'name': 'Тестовая'}]}
 
     def message(self, text, user=42):
-        return {'update_id': 1, 'message': {'chat': {'id': user, 'type': 'private'}, 'text': text}}
+        return {'update_id': 1, 'message': {'from': {'id': user}, 'chat': {'id': user, 'type': 'private'}, 'text': text}}
 
     def callback(self, data, user=42):
-        return {'update_id': 1, 'callback_query': {'id': 'callback', 'from': {'id': user}, 'data': data}}
+        return {'update_id': 1, 'callback_query': {'id': 'callback', 'from': {'id': user}, 'message': {'chat': {'id': user, 'type': 'private'}}, 'data': data}}
 
     def test_arrival_error_is_shown_without_old_values(self):
         with patch.object(bot.SOURCE, 'get', side_effect=Limited('Временное ограничение')):
@@ -105,8 +107,7 @@ class BotTests(unittest.TestCase):
     def test_delete_callback_removes_selected_stop_only(self):
         state = self.state()
         state['stops'].append({'url': bot.DEFAULT.replace('9675162', '123'), 'name': 'Другая'})
-        update = {'update_id': 1, 'callback_query': {
-            'id': 'callback', 'from': {'id': 42}, 'data': 'delete:stop__9675162'}}
+        update = self.callback('delete:stop__9675162')
         self.run_update(state, update)
         self.assertEqual([s['name'] for s in state['stops']], ['Другая'])
 
@@ -146,6 +147,62 @@ class BotTests(unittest.TestCase):
             send, _ = self.run_update(state, self.message(other))
         self.assertEqual(len(state['stops']), 1)
         self.assertIn('Временное ограничение', send.call_args.args[1])
+
+    def test_all_three_users_can_open_their_own_menu(self):
+        root = {'version': 2, 'offset': 0, 'users': {}}
+        for user in (42, 43, 44):
+            send, _ = self.run_update(root, self.message('/start', user=user))
+            self.assertEqual(send.call_args.args[0], user)
+        self.assertEqual(set(root['users']), {'42', '43', '44'})
+        self.assertIsNot(root['users']['42']['stops'], root['users']['43']['stops'])
+
+    def test_unauthorized_start_does_not_claim_access(self):
+        root = {'version': 2, 'offset': 0, 'users': {}}
+        with patch.object(bot.SOURCE, 'get') as get:
+            send, _ = self.run_update(root, self.message('/start', user=99))
+        self.assertEqual(root['users'], {})
+        self.assertIn('Доступ закрыт', send.call_args.args[1])
+        self.assertEqual(send.call_args.args[2], {'remove_keyboard': True})
+        get.assert_not_called()
+
+    def test_allowed_user_cannot_delete_another_users_stop(self):
+        owner = self.state()
+        other = {'owner': 43, 'stops': []}
+        root = {'version': 2, 'offset': 0, 'users': {'42': owner, '43': other}}
+        self.run_update(root, self.callback('delete:stop__9675162', user=43))
+        self.assertEqual(len(owner['stops']), 1)
+        self.assertEqual(other['stops'], [])
+
+    def test_untrusted_callback_chat_is_rejected(self):
+        update = self.callback('arrival:stop__9675162')
+        update['callback_query']['message']['chat'] = {'id': -123, 'type': 'group'}
+        with patch.object(bot.SOURCE, 'get') as get:
+            send, _ = self.run_update(self.state(), update)
+        get.assert_not_called()
+        send.assert_not_called()
+
+    def test_legacy_state_migration_preserves_stops_and_offset(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(bot, 'STATE', Path(folder)):
+            legacy = self.state()
+            legacy['offset'] = 17
+            (Path(folder) / 'state.json').write_text(json.dumps(legacy), encoding='utf-8')
+            root = bot.load()
+            self.assertEqual(root['offset'], 17)
+            self.assertEqual(root['users']['42']['stops'], legacy['stops'])
+            self.assertEqual(root['users']['42']['owner'], 42)
+
+    def test_allowlist_is_required_and_validated(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'allowed.json'
+            with patch.dict('os.environ', {'YANDEXBUS_ALLOWED_USERS_FILE': str(path)}):
+                with self.assertRaises(RuntimeError):
+                    bot.allowed_users()
+                for value in ([], ['42'], [True], [-42], {'users': [42]}):
+                    path.write_text(json.dumps(value), encoding='utf-8')
+                    with self.assertRaises(RuntimeError):
+                        bot.allowed_users()
+                path.write_text('[42,43,44]', encoding='utf-8')
+                self.assertEqual(bot.allowed_users(), {42, 43, 44})
 
 
 if __name__ == '__main__':
