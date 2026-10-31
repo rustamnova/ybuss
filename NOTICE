@@ -1,0 +1,12 @@
+Ybuss
+Copyright 2026 rustamnova
+
+Telegram bot implementation for public transport arrivals at saved stops.
+Created and maintained by rustamnova.
+Original project: https://github.com/rustamnova/ybuss
+
+Licensed under the Apache License, Version 2.0. See LICENSE.
+This notice is informational and does not modify the license.
+
+Yandex Maps transport data is not licensed by this repository.
+Ybuss is an independent project, not an official Yandex or Telegram bot.

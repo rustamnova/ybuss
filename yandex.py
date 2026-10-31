@@ -1,3 +1,6 @@
+# Copyright 2026 rustamnova
+# SPDX-License-Identifier: Apache-2.0
+
 """Read the public stop page's embedded state; no browser or private API."""
 
 import datetime as dt

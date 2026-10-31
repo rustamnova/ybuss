@@ -1,3 +1,6 @@
+# Copyright 2026 rustamnova
+# SPDX-License-Identifier: Apache-2.0
+
 [Unit]
 Description=YandexBus Telegram arrivals
 After=network-online.target

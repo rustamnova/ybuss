@@ -1,3 +1,6 @@
+# Copyright 2026 rustamnova
+# SPDX-License-Identifier: Apache-2.0
+
 import datetime as dt
 import json
 import unittest
