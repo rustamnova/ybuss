@@ -1,0 +1,26 @@
+[Unit]
+Description=YandexBus Telegram arrivals
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=yandexbus
+Group=yandexbus
+WorkingDirectory=/opt/yandexbus
+ExecStart=/usr/bin/python3 /opt/yandexbus/bot.py
+StateDirectory=yandexbus
+Environment=HOME=/var/lib/yandexbus
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+MemoryMax=128M
+CPUQuota=25%
+TasksMax=20
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

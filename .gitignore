@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+.env.*
+token
+*.token
+state.json
+state.tmp
+*.log
+.secrets/
+backups/
