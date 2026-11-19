@@ -61,7 +61,9 @@ class BotTests(unittest.TestCase):
             send, _ = self.run_update(state, self.message('📍 Остановки'))
         get.assert_not_called()
         buttons = send.call_args.args[2]['inline_keyboard']
-        self.assertEqual([row[0]['text'] for row in buttons], ['Тестовая', 'Другая'])
+        self.assertEqual([row[0]['text'] for row in buttons[:2]], ['Тестовая', 'Другая'])
+        self.assertEqual([row[0]['callback_data'] for row in buttons[2:]], ['stop_add', 'stop_remove'])
+        self.assertEqual(bot.KEYBOARD['keyboard'], [[{'text': '📍 Остановки'}]])
         self.assertEqual(buttons[1][0]['callback_data'], 'arrival:stop__123')
         self.assertNotIn('🚌 Прибытие', str(bot.KEYBOARD))
 
@@ -99,7 +101,7 @@ class BotTests(unittest.TestCase):
         self.assertIn('Выбери остановку', send.call_args.args[1])
 
     def test_delete_button_contains_name_and_stable_identifier(self):
-        send, _ = self.run_update(self.state(), self.message('➖ Удалить остановку'))
+        send, _ = self.run_update(self.state(), self.callback('stop_remove'))
         button = send.call_args.args[2]['inline_keyboard'][0][0]
         self.assertEqual(button['text'], 'Удалить: Тестовая')
         self.assertEqual(button['callback_data'], 'delete:stop__9675162')
@@ -112,7 +114,7 @@ class BotTests(unittest.TestCase):
         self.assertEqual([s['name'] for s in state['stops']], ['Другая'])
 
     def test_add_button_requests_short_or_full_link(self):
-        send, _ = self.run_update(self.state(), self.message('➕ Добавить остановку'))
+        send, _ = self.run_update(self.state(), self.callback('stop_add'))
         self.assertIn('короткую или полную', send.call_args.args[1])
 
     def test_short_and_full_link_add_save_and_deduplicate(self):

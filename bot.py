@@ -16,7 +16,7 @@ TOKEN = None
 SOURCE = Client()
 CURRENT_STATE = None
 DEFAULT = 'https://yandex.ru/maps/213807/boltino/stops/stop__9675162/?tab=overview'
-KEYBOARD = {'keyboard': [[{'text': '📍 Остановки'}], [{'text': '➕ Добавить остановку'}, {'text': '➖ Удалить остановку'}]], 'resize_keyboard': True}
+KEYBOARD = {'keyboard': [[{'text': '📍 Остановки'}]], 'resize_keyboard': True}
 
 
 def api(method, **data):
@@ -106,13 +106,27 @@ def add_stop(state, text):
 
 
 def show_stops(state):
-    if not state['stops']:
-        send(state['owner'], 'Остановок пока нет. Нажми «➕ Добавить остановку» и пришли ссылку Яндекс Карт.')
-        return
     buttons = [[{'text': stop['name'],
                  'callback_data': 'arrival:' + stop['url'].split('/stops/')[-1].split('/')[0]}]
                for stop in state['stops']]
-    send(state['owner'], '📍 Выбери остановку — покажу прибытие автобусов только по ней:',
+    buttons.append([{'text': '➕ Добавить остановку', 'callback_data': 'stop_add'}])
+    if state['stops']:
+        buttons.append([{'text': '➖ Удалить остановку', 'callback_data': 'stop_remove'}])
+    send(state['owner'], '📍 Выбери остановку — покажу прибытие автобусов только по ней:' if state['stops']
+         else 'Остановок пока нет. Добавь первую кнопкой ниже:',
+         {'inline_keyboard': buttons})
+
+
+def prompt_add(state):
+    send(state['owner'], 'Пришли ссылку на остановку Яндекс Карт — короткую или полную. Я определю название и добавлю её в меню «Остановки».')
+
+
+def prompt_remove(state):
+    buttons = [[{'text': 'Удалить: ' + stop['name'],
+                 'callback_data': 'delete:' + stop['url'].split('/stops/')[-1].split('/')[0]}]
+               for stop in state['stops']]
+    buttons.append([{'text': '📍 Назад к остановкам', 'callback_data': 'stops'}])
+    send(state['owner'], 'Выбери остановку для удаления:' if state['stops'] else 'Остановок пока нет.',
          {'inline_keyboard': buttons})
 
 
@@ -165,6 +179,10 @@ def main():
                         data = callback.get('data', '')
                         if data == 'stops':
                             show_stops(state)
+                        elif data == 'stop_add':
+                            prompt_add(state)
+                        elif data == 'stop_remove':
+                            prompt_remove(state)
                         elif data.startswith('arrival:'):
                             try:
                                 show_arrivals(state, data.split(':', 1)[1])
@@ -192,15 +210,12 @@ def main():
                                 send(chat_id, 'Готов! Открой «📍 Остановки» и выбери нужную кнопкой. Твой список остановок доступен только тебе. 🟢 — прогноз, 🕒 — расписание.')
                                 show_stops(state)
                             elif text in ('📍 Остановки', '/stops', '🚌 Прибытие', '/bus'):
+                                send(chat_id, '📍 Твои остановки')
                                 show_stops(state)
                             elif text == '➕ Добавить остановку':
-                                send(chat_id, 'Пришли ссылку на остановку Яндекс Карт — короткую или полную. Я определю название и добавлю её в меню «Остановки».')
+                                prompt_add(state)
                             elif text == '➖ Удалить остановку':
-                                buttons = [[{'text': 'Удалить: ' + s['name'], 'callback_data': 'delete:' + s['url'].split('/stops/')[-1].split('/')[0]}] for s in state['stops']]
-                                if buttons:
-                                    send(chat_id, 'Выбери остановку для удаления:', {'inline_keyboard': buttons})
-                                else:
-                                    send(chat_id, 'Остановок пока нет.')
+                                prompt_remove(state)
                             elif text.startswith('/remove '):
                                 index = int(text.split()[1]) - 1
                                 if not 0 <= index < len(state['stops']):
