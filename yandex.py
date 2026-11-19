@@ -139,7 +139,17 @@ def parse_page(html, url, fetched_at=None):
         if not name or not isinstance(transports, list) or not math.isfinite(source_time):
             raise ValueError()
         dt.timezone(dt.timedelta(seconds=tz_offset))
-        expected_id = urllib.parse.urlsplit(url).path.rstrip('/').split('/')[-1]
+        path = urllib.parse.urlsplit(url).path
+        if re.fullmatch(r'/maps/org/[^/]+/\d+/?', path):
+            # Organization cards can be alternate public URLs for exact stops.
+            # Require explicit stop selection; never choose a nearby search result.
+            expected_id = str(state['config']['query']['masstransit']['stopId'])
+            if str(state['config']['landing']['stopId']) != expected_id:
+                raise ValueError()
+            region = stop['region']
+            url = canonical_url(f"https://yandex.ru/maps/{region['id']}/{region['seoname']}/stops/{stop['id']}/")
+        else:
+            expected_id = path.rstrip('/').split('/')[-1]
         if str(stop['id']) != expected_id:
             raise ValueError()
     except (KeyError, ValueError, TypeError, OverflowError):
@@ -218,7 +228,8 @@ class Client:
         url = match.group().rstrip(').,')
         if not allowed_url(url):
             raise ValueError('Нужна HTTPS-ссылка на Яндекс Карты.')
-        if urllib.parse.urlsplit(url).path.startswith('/maps/-/'):
+        path = urllib.parse.urlsplit(url).path
+        if path.startswith('/maps/-/') or re.fullmatch(r'/maps/org/[^/]+/\d+/?', path):
             if self.monotonic() < self.blocked_until:
                 raise Limited('Пауза после ограничения Яндекса. Повтори позже.')
             try:

@@ -158,6 +158,42 @@ class SourceTests(unittest.TestCase):
         self.assertEqual(client.get(url).name, 'Тестовая остановка')
         self.assertEqual(len(calls), 1)
 
+    def org_page(self):
+        state = json.loads(page().split('>', 1)[1].split('</script>')[0])
+        config = state['config']
+        config['query'] = {'masstransit': {'stopId': 'stop__9675162'}}
+        config['landing'] = {'stopId': 'stop__9675162'}
+        config['masstransitStop']['region'] = {'id': 213807, 'seoname': 'boltino'}
+        return state
+
+    def test_org_card_resolves_exact_stop_and_reuses_response(self):
+        state = self.org_page()
+        html = '<script type="application/json" class="state-view">' + json.dumps(state) + '</script>'
+        org = 'https://yandex.com/maps/org/voinskaya_chast/23592349300?si=example'
+        calls = []
+        def fetch(url):
+            calls.append(url)
+            return html, org
+        client = Client(fetcher=fetch, clock=lambda: NOW)
+        resolved = client.resolve('Воинская часть\nАдрес\n' + org)
+        self.assertEqual(resolved, URL)
+        self.assertEqual(client.get(resolved).name, 'Тестовая остановка')
+        self.assertEqual(len(calls), 1)
+
+    def test_org_card_without_explicit_selected_stop_is_rejected(self):
+        state = self.org_page()
+        del state['config']['query']['masstransit']
+        html = '<script type="application/json" class="state-view">' + json.dumps(state) + '</script>'
+        with self.assertRaises(SourceError):
+            parse_page(html, 'https://yandex.com/maps/org/place/123', NOW)
+
+    def test_org_card_conflicting_stop_selection_is_rejected(self):
+        state = self.org_page()
+        state['config']['landing']['stopId'] = 'other'
+        html = '<script type="application/json" class="state-view">' + json.dumps(state) + '</script>'
+        with self.assertRaises(SourceError):
+            parse_page(html, 'https://yandex.com/maps/org/place/123', NOW)
+
 
 if __name__ == '__main__':
     unittest.main()
